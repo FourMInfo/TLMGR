@@ -81,10 +81,6 @@ The multiplexor (`ctan`) auto-picks a geographically nearby mirror each time,
 so it's a reasonable last-resort fallback, but a pinned German mirror is
 usually faster and more predictable for you specifically.
 
-## Full mirror status
-
-Live sync/reachability status for every CTAN mirror: https://ctan.org/mirrors/mirmon
-
 ## Companion script
 
 `tlmgr-safe-update.sh` wraps the above into three modes:
@@ -93,10 +89,51 @@ Live sync/reachability status for every CTAN mirror: https://ctan.org/mirrors/mi
   current repo first and offers a tested fallback if it's down.
 - `./tlmgr-safe-update.sh --update` — real update
   (`sudo tlmgr update --self --all`), same repo check first.
-- `./tlmgr-safe-update.sh --choose` — tests *every* known mirror, shows a
-  numbered list of the ones that respond, and lets you deliberately set
-  any of them as the new default. Useful for moving back "up" to a
-  preferred mirror (e.g. GWDG) after having fallen back to a lower-choice
-  one, rather than only ever accepting the first automatic fallback found.
+- `./tlmgr-safe-update.sh --choose` — interactive only: tests *every*
+  known mirror, shows a numbered list of the ones that respond, and lets
+  you deliberately set any of them as the new default. Useful for moving
+  back "up" to a preferred mirror (e.g. GWDG) after having fallen back to
+  a lower-choice one.
 
 The active repository is tracked in `~/.tlmgr_repo_current`.
+
+### Logging and rotation
+
+Every run writes a timestamped log to `~/Code/FourM/Logs/tlmgr_update_<timestamp>.log`
+(directory created automatically if missing). Interactive runs still print
+to the terminal as usual — the log is a mirror of that output, not a
+replacement. After each run, logs older than the most recent 30 are
+pruned automatically.
+
+### Unattended (launchd/cron) runs
+
+The script detects whether it has a controlling terminal (`[[ -t 0 ]]`)
+and adjusts automatically — no separate flag needed:
+
+- **No confirmation prompts.** If the current mirror is down, it switches
+  to the first working fallback and logs the decision instead of asking.
+- **`--choose` refuses to run** without a terminal, since it depends on
+  interactive selection.
+- **`sudo` runs as `sudo -n`.** If passwordless sudo isn't configured for
+  `tlmgr`, the run fails immediately with an actionable log message
+  instead of hanging on a password prompt no one is there to answer.
+
+For unattended `--update` runs to work at all, passwordless sudo has to
+be configured once, scoped to just the `tlmgr` binary:
+
+```bash
+sudo visudo -f /etc/sudoers.d/tlmgr-nopasswd
+```
+
+Add a line like:
+
+```
+yourusername ALL=(root) NOPASSWD: /Library/TeX/texbin/tlmgr
+```
+
+(Confirm the path with `command -v tlmgr` first — it matches your setup
+if you've been using the CLI already.)
+
+## Full mirror status
+
+Live sync/reachability status for every CTAN mirror: https://ctan.org/mirrors/mirmon

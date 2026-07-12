@@ -10,25 +10,48 @@
 # Usage:
 #   ./tlmgr-safe-update.sh            # dry run: `tlmgr update --list` (no sudo)
 #   ./tlmgr-safe-update.sh --update   # real update: `sudo tlmgr update --self --all`
-#   ./tlmgr-safe-update.sh --choose   # test ALL known mirrors, show a numbered
-#                                      # list of working ones, let you pick one
-#                                      # to set as the default (no update run)
+#   ./tlmgr-safe-update.sh --choose   # interactive only: test ALL known mirrors,
+#                                      # show a numbered list of working ones,
+#                                      # let you pick one to set as default
+#
+# Unattended (launchd/cron) use:
+#   The script auto-detects whether it has a controlling terminal. With no
+#   TTY (e.g. run from launchd), it:
+#     - never uses `read -rp` — mirror fallback is chosen automatically
+#       and logged, not confirmed interactively
+#     - refuses --choose, since it requires interactive input
+#     - runs sudo with `-n` (non-interactive): if passwordless sudo isn't
+#       configured for tlmgr, it fails fast with a clear log message
+#       instead of hanging forever waiting for a password no one will type
+#
+#   For unattended --update to work at all, passwordless sudo must be
+#   configured once for the tlmgr binary:
+#     sudo visudo -f /etc/sudoers.d/tlmgr-nopasswd
+#   and add a line like:
+#     yourusername ALL=(root) NOPASSWD: /Library/TeX/texbin/tlmgr
 #
 # `--self --all` together is tlmgr's own sanctioned combined form: it
 # updates the infrastructure first and, if that succeeds, automatically
 # restarts itself to finish updating everything else in one call. This is
 # what TeX Live Utility does under the hood, so this script always uses
 # the combined form rather than offering --all/--self as separate choices.
-#
-# `--choose` exists for the case where you've fallen back through several
-# mirrors over time and want to deliberately move back "up" to a preferred
-# one (e.g. GWDG) once it's healthy again, rather than only ever accepting
-# whatever the automatic fallback found first.
 
 set -uo pipefail
 
+# launchd (and cron) run jobs with a minimal PATH that often excludes
+# /Library/TeX/texbin and Homebrew — unlike an interactive shell, which
+# picks these up from .zshrc/.bash_profile. Set explicitly so tlmgr, curl,
+# and sudo all resolve regardless of how this script is invoked. The
+# companion plist also sets this via EnvironmentVariables; this is a
+# second, redundant safeguard in case the script is ever run some other way.
+export PATH="/Library/TeX/texbin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 STATE_FILE="$HOME/.tlmgr_repo_current"
 TIMEOUT=8
+
+# Where logs are written and how many to keep.
+LOG_DIR="$HOME/Code/FourM/Logs"
+LOG_KEEP=30
 
 # Ordered candidate mirrors. First entry is tried first; the multiplexor
 # alias is the last-resort fallback since it auto-routes but is less
@@ -41,6 +64,42 @@ REPOS=(
   "https://ftp.tu-chemnitz.de/pub/tex/systems/texlive/tlnet"
   "https://mirrors.ctan.org/systems/texlive/tlnet"
 )
+
+# --- interactivity detection -------------------------------------------
+
+# No controlling terminal on stdin (launchd/cron) means no one can answer
+# a prompt. Detect this once, up front, and change behavior accordingly.
+if [[ -t 0 ]]; then
+  AUTO_MODE=false
+else
+  AUTO_MODE=true
+fi
+
+# --- logging -------------------------------------------------------------
+
+mkdir -p "$LOG_DIR"
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+LOG_FILE="$LOG_DIR/tlmgr_update_${TIMESTAMP}.log"
+
+# Mirror everything (stdout and stderr) to the log file. In an interactive
+# session it still prints to the terminal as normal; under launchd, only
+# the log file captures it, which is the point.
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+rotate_logs() {
+  # ── Log rotation: keep last $LOG_KEEP logs ──────────────────────────
+  local log_count
+  log_count=$(ls -1 "$LOG_DIR"/tlmgr_update_*.log 2>/dev/null | wc -l | tr -d ' \n')
+  if [[ "$log_count" -gt "$LOG_KEEP" ]]; then
+    local to_delete=$(( log_count - LOG_KEEP ))
+    ls -1 "$LOG_DIR"/tlmgr_update_*.log | sort | head -"$to_delete" | xargs rm -f
+    log "Pruned $to_delete old log(s)"
+  fi
+}
 
 # --- helpers ---------------------------------------------------------------
 
@@ -55,7 +114,6 @@ get_current_repo() {
     cat "$STATE_FILE"
     return
   fi
-  # Fall back to whatever tlmgr itself has configured.
   tlmgr option repository 2>/dev/null | awk -F': ' '/repository/ {print $2}'
 }
 
@@ -63,14 +121,34 @@ record_repo() {
   echo "$1" > "$STATE_FILE"
 }
 
+# Wraps sudo so unattended runs fail fast instead of hanging on a
+# password prompt that will never be answered.
+run_sudo() {
+  if [[ "$AUTO_MODE" == true ]]; then
+    if ! sudo -n "$@"; then
+      log "ERROR: sudo requires a password and this is running unattended."
+      log "Fix: sudo visudo -f /etc/sudoers.d/tlmgr-nopasswd"
+      log "     and add: \$(whoami) ALL=(root) NOPASSWD: \$(command -v tlmgr)"
+      exit 1
+    fi
+  else
+    sudo "$@"
+  fi
+}
+
 set_repo() {
   local url="$1"
-  echo "Setting tlmgr default repository to: $url"
-  sudo tlmgr option repository "$url"
+  log "Setting tlmgr default repository to: $url"
+  run_sudo tlmgr option repository "$url"
   record_repo "$url"
 }
 
 choose_repo() {
+  if [[ "$AUTO_MODE" == true ]]; then
+    log "ERROR: --choose requires an interactive terminal; refusing to run unattended."
+    exit 1
+  fi
+
   echo "== Testing all known mirrors =="
   echo
 
@@ -90,10 +168,10 @@ choose_repo() {
   echo
 
   if [[ ${#working_urls[@]} -eq 0 ]]; then
-    echo "None of the known mirrors responded — this is unusual."
-    echo "This may indicate a broader network issue on your end, or a genuine"
-    echo "problem with TeX Live's infrastructure. Bring this output to Claude"
-    echo "for guidance before proceeding further."
+    log "None of the known mirrors responded — this is unusual."
+    log "This may indicate a broader network issue on your end, or a genuine"
+    log "problem with TeX Live's infrastructure. Bring this output to Claude"
+    log "for guidance before proceeding further."
     exit 1
   fi
 
@@ -119,38 +197,36 @@ choose_repo() {
 
   local selected="${working_urls[$((choice - 1))]}"
   set_repo "$selected"
-  echo "Default repository set to: $selected"
+  log "Default repository set to: $selected"
 }
 
 # --- main --------------------------------------------------------------
 
 mode="${1:-}"
 
+log "== tlmgr-safe-update starting (mode: ${mode:-list}, auto: $AUTO_MODE) =="
+
 if [[ "$mode" == "--choose" ]]; then
   choose_repo
+  rotate_logs
   exit 0
 fi
 
-echo "== TeX Live repository check =="
-
 current="$(get_current_repo)"
 if [[ -z "$current" ]]; then
-  echo "No repository currently recorded or configured; defaulting to first known mirror."
+  log "No repository currently recorded or configured; defaulting to first known mirror."
   current="${REPOS[0]}"
 fi
 
-echo "Current repository: $current"
-printf "Testing connectivity... "
+log "Current repository: $current"
+log "Testing connectivity..."
 
 if test_repo "$current"; then
-  echo "OK"
+  log "OK: $current"
   record_repo "$current"
 else
-  echo "FAILED"
-  echo
-  echo "Repository unreachable: $current"
-  echo "Testing known alternatives in order..."
-  echo
+  log "FAILED: $current"
+  log "Testing known alternatives in order..."
 
   found=""
   for repo in "${REPOS[@]}"; do
@@ -166,21 +242,26 @@ else
   done
 
   if [[ -n "$found" ]]; then
-    echo
-    read -rp "Switch default repository to $found? [Y/n] " answer
-    answer="${answer:-Y}"
-    if [[ "$answer" =~ ^[Yy] ]]; then
+    if [[ "$AUTO_MODE" == true ]]; then
+      log "AUTO: switching default repository to $found (unattended run, no confirmation needed)"
       set_repo "$found"
       current="$found"
     else
-      echo "Keeping current (unreachable) repository. The update below will likely fail."
+      echo
+      read -rp "Switch default repository to $found? [Y/n] " answer
+      answer="${answer:-Y}"
+      if [[ "$answer" =~ ^[Yy] ]]; then
+        set_repo "$found"
+        current="$found"
+      else
+        log "Keeping current (unreachable) repository. The update below will likely fail."
+      fi
     fi
   else
-    echo
-    echo "None of the known mirrors responded — this is unusual."
-    echo "This may indicate a broader network issue on your end, or a genuine"
-    echo "problem with TeX Live's infrastructure. Bring this output to Claude"
-    echo "for guidance before proceeding further."
+    log "None of the known mirrors responded — this is unusual."
+    log "This may indicate a broader network issue, or a genuine problem with"
+    log "TeX Live's infrastructure. Bring this log to Claude for guidance."
+    rotate_logs
     exit 1
   fi
 fi
@@ -188,14 +269,14 @@ fi
 # --- run the actual update --------------------------------------------
 
 if [[ "$mode" == "--update" ]]; then
-  echo
-  echo "Running: sudo tlmgr update --self --all  (repository: $current)"
-  echo
-  sudo tlmgr update --self --all
+  log "Running: sudo tlmgr update --self --all  (repository: $current)"
+  run_sudo tlmgr update --self --all
 else
-  echo
-  echo "Running: tlmgr update --list  (repository: $current)"
-  echo "(dry run — pass --update to actually install, or --choose to switch mirrors)"
-  echo
+  log "Running: tlmgr update --list  (repository: $current)"
+  log "(dry run — pass --update to actually install, or --choose to switch mirrors)"
   tlmgr update --list
 fi
+
+log "== tlmgr-safe-update finished =="
+
+rotate_logs
