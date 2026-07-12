@@ -53,15 +53,14 @@ A successful, non-empty response means the mirror is reachable and serving real 
 ### Mirror list
 
 Since I reside in Israel the closest repos are in Germany (YMMV and you likely will have to edit this list). The list is defined at the top of the script (`REPOS=(...)`), in priority order:
+
 1. GWDG
 2. FAU
 3. Erlangen
 4. cicku.me (DE)
 5. RRZE Erlangen
 6. TU Chemnitz, then the
-7. [CTAN multiplexor](https://mirrors.ctan.org/systems/texlive/tlnet) as a
-last resort, since it auto-routes to *some* working mirror but with less
-predictable latency than a pinned one. 
+7. [CTAN multiplexor](https://mirrors.ctan.org/systems/texlive/tlnet) as a last resort, since it auto-routes to *some* working mirror but with less predictable latency than a pinned one.
 
 All were chosen for consistently fast connectivity from Israel and current "ok" status on
 [CTAN mirmon](https://ctan.org/mirrors/mirmon) at time of writing; edit the array directly to add, remove, or reorder mirrors.
