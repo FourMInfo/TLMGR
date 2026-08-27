@@ -95,15 +95,16 @@ usually faster and more predictable for you specifically.
   back "up" to a preferred mirror (e.g. GWDG) after having fallen back to
   a lower-choice one.
 
-The active repository is tracked in `~/.tlmgr_repo_current`.
+The active repository is tracked in `$STATE_FILE`, `~/.tlmgr_repo_current`
+by default — see `config.sh`.
 
 ### Logging and rotation
 
-Every run writes a timestamped log to `~/Code/FourM/Logs/tlmgr_update_<timestamp>.log`
-(directory created automatically if missing). Interactive runs still print
-to the terminal as usual — the log is a mirror of that output, not a
-replacement. After each run, logs older than the most recent 30 are
-pruned automatically.
+Every run writes a timestamped log to `$LOG_DIR/tlmgr_update_<timestamp>.log`,
+where `LOG_DIR` comes from `config.sh` (directory created automatically if
+missing). Interactive runs still print to the terminal as usual — the log is
+a mirror of that output, not a replacement. After each run, logs older than
+the most recent `$KEEP_LOGS` are pruned automatically.
 
 ### Unattended (launchd/cron) runs
 

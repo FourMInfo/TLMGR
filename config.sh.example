@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# config.sh.example — copy to config.sh and fill in your own values:
+#
+#   cp config.sh.example config.sh
+#
+# config.sh is gitignored. It holds real local paths, and this is a public
+# repo; only this template is committed. It is hand-carried between machines
+# rather than generated, so an older copy that predates a new key is normal.
+#
+# Contract: a *missing config.sh* is a hard error — every script refuses to
+# run without it. A missing individual *key* is not: each falls back to a
+# documented default and says so, because of that hand-carrying.
+
+# Where this repo lives.
+#
+# Normally left commented out. Each script derives its own directory and uses
+# that, which is correct whenever the scripts sit together in a checkout —
+# and it is what lets the launchd job point at the repo wherever it actually
+# is, rather than at a path baked in when the plist was written. Set it only
+# if you deliberately run the scripts from somewhere else.
+#
+# SCRIPT_DIR="$HOME/path/to/TLMGR"
+
+# Where run logs are written, and how many to keep. Logs are named
+# tlmgr_update_YYYYMMDD_HHMMSS.log and pruned to the newest $KEEP_LOGS after
+# every run. Keep this OUTSIDE the repo — it is a public one.
+# Falls back to $HOME/Library/Logs/tlmgr if unset.
+LOG_DIR="$HOME/path/to/Logs"
+KEEP_LOGS=30
+
+# Records which TeX Live mirror is currently in use, so a run can report and
+# restore the choice without interrogating tlmgr every time. A small plain
+# text file holding one URL.
+# Falls back to $HOME/.tlmgr_repo_current if unset.
+STATE_FILE="$HOME/.tlmgr_repo_current"
