@@ -38,6 +38,32 @@
 
 set -uo pipefail
 
+# --- configuration -------------------------------------------------------
+
+# SCRIPT_DIR has to be derived here because it is what locates config.sh.
+# config.sh may override it; if it doesn't, this script's own directory wins.
+_self_dir="$(cd "$(dirname "$0")" && pwd)"
+if [[ ! -f "$_self_dir/config.sh" ]]; then
+    echo "ERROR: config.sh not found at $_self_dir/config.sh"
+    echo "  Copy config.sh.example to config.sh and fill in your values."
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$_self_dir/config.sh"
+SCRIPT_DIR="${SCRIPT_DIR:-$_self_dir}"
+
+# Individual keys fall back rather than failing: config.sh is hand-carried
+# between machines, so a copy predating a new key is expected, not an error.
+# Each fallback announces itself so output never lands somewhere unexplained.
+if [[ -z "${LOG_DIR:-}" ]]; then
+    LOG_DIR="$HOME/Library/Logs/tlmgr"
+    echo "NOTE: LOG_DIR not set in config.sh — using $LOG_DIR"
+fi
+KEEP_LOGS="${KEEP_LOGS:-30}"
+STATE_FILE="${STATE_FILE:-$HOME/.tlmgr_repo_current}"
+
+TIMEOUT=8
+
 # launchd (and cron) run jobs with a minimal PATH that often excludes
 # /Library/TeX/texbin and Homebrew — unlike an interactive shell, which
 # picks these up from .zshrc/.bash_profile. Set explicitly so tlmgr, curl,
@@ -45,13 +71,6 @@ set -uo pipefail
 # companion plist also sets this via EnvironmentVariables; this is a
 # second, redundant safeguard in case the script is ever run some other way.
 export PATH="/Library/TeX/texbin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-
-STATE_FILE="$HOME/.tlmgr_repo_current"
-TIMEOUT=8
-
-# Where logs are written and how many to keep.
-LOG_DIR="$HOME/Code/FourM/Logs"
-LOG_KEEP=30
 
 # Ordered candidate mirrors. First entry is tried first; the multiplexor
 # alias is the last-resort fallback since it auto-routes but is less
@@ -91,11 +110,11 @@ log() {
 }
 
 rotate_logs() {
-  # ── Log rotation: keep last $LOG_KEEP logs ──────────────────────────
+  # ── Log rotation: keep last $KEEP_LOGS logs ──────────────────────────
   local log_count
   log_count=$(ls -1 "$LOG_DIR"/tlmgr_update_*.log 2>/dev/null | wc -l | tr -d ' \n')
-  if [[ "$log_count" -gt "$LOG_KEEP" ]]; then
-    local to_delete=$(( log_count - LOG_KEEP ))
+  if [[ "$log_count" -gt "$KEEP_LOGS" ]]; then
+    local to_delete=$(( log_count - KEEP_LOGS ))
     ls -1 "$LOG_DIR"/tlmgr_update_*.log | sort | head -"$to_delete" | xargs rm -f
     log "Pruned $to_delete old log(s)"
   fi
@@ -129,6 +148,7 @@ run_sudo() {
       log "ERROR: sudo requires a password and this is running unattended."
       log "Fix: sudo visudo -f /etc/sudoers.d/tlmgr-nopasswd"
       log "     and add: \$(whoami) ALL=(root) NOPASSWD: \$(command -v tlmgr)"
+      rotate_logs
       exit 1
     fi
   else
