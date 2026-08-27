@@ -9,6 +9,30 @@ This repo provides documentation and tools to replace the core functionality of 
 3. A macOS `plist` to run the update nightly via `launchd`.
 4. A script to install that plist so it runs automatically.
 
+## Setup: `config.sh`
+
+Every script reads its paths from `config.sh`, which is **not** committed — this
+is a public repo and those are local paths. Copy the template and edit it once
+per machine:
+
+```bash
+cp config.sh.example config.sh
+$EDITOR config.sh
+```
+
+`config.sh.example` documents each key. In short: `LOG_DIR` and `KEEP_LOGS`
+control where run logs go and how many are kept, `STATE_FILE` is where the
+selected mirror is recorded, and `SCRIPT_DIR` is normally left commented out
+because each script derives its own location.
+
+**A missing `config.sh` is a hard error** — the scripts refuse to run without
+it, because the file is the contract. A missing individual *key* is not: it
+falls back to a documented default and says so, since `config.sh` is carried
+between machines by hand and an older copy can predate a new key.
+
+One definition per path is one place to change it, and one place for it to be
+wrong.
+
 ## Script Commands
 
 ### Check for updates (safe, read-only)
@@ -72,7 +96,7 @@ cat ~/.tlmgr_repo_current
 
 ## Logging and rotation
 
-Every run writes a timestamped log to `~/Code/FourM/Logs/tlmgr_update_<timestamp>.log` (directory created automatically if missing). Interactive runs still print to the terminal as usual — the log is a mirror of that output, not a replacement. After each run, logs older than the most recent 30 are pruned automatically.
+Every run writes a timestamped log to `$LOG_DIR/tlmgr_update_<timestamp>.log`, where `LOG_DIR` comes from `config.sh` (the directory is created automatically if missing; if the key is absent the script falls back to `~/Library/Logs/tlmgr` and says so). Interactive runs still print to the terminal as usual — the log is a mirror of that output, not a replacement. After each run, logs older than the most recent `$KEEP_LOGS` are pruned automatically.
 
 ## Running unattended via launchd
 
@@ -97,6 +121,32 @@ yourusername ALL=(root) NOPASSWD: /Library/TeX/texbin/tlmgr
 ```
 
 Confirm the path first with `command -v tlmgr`. The `launchd` job installed by this repo runs as a **LaunchAgent** (`~/Library/LaunchAgents`), which runs as your own user — so this rule, scoped to your username, covers it. (A LaunchDaemon under `/Library/LaunchDaemons` would instead run as root by default, which is a different situation — not what this repo sets up.)
+
+### Installing, and updating an installed job
+
+```bash
+./install_tlmgr_script_launchd.sh
+```
+
+The plist in this repo ships with a `__TLMGR_SCRIPT__` placeholder rather than a
+real path; the installer substitutes the actual location of this checkout. That
+is deliberate — an earlier version substituted only the username, leaving
+`Code/FourM/TLMGR` baked in, so a clone kept anywhere else would install
+cleanly and then run nothing at 1am.
+
+**To update an already-installed job, just run the installer again.** You never
+delete anything by hand. Editing the plist — here or the installed copy under
+`~/Library/LaunchAgents` — has no effect on its own, because `launchd` holds the
+loaded job in memory; a changed file sits inert until the job is booted out and
+bootstrapped again, which is what re-running the installer does. It is safe to
+run repeatedly, and it must be run on **each machine** that runs the job, since
+every machine has its own installed copy.
+
+The installer uses `launchctl bootout` / `bootstrap` rather than the legacy
+`unload` / `load` pair, which recent macOS versions handle unreliably — often
+failing with a generic I/O error when nothing is wrong. A job originally loaded
+with `launchctl load` is booted out by the modern command without special
+handling; it is the same job in the same domain either way.
 
 ### Why the plist sets `PATH` explicitly
 

@@ -1,0 +1,13 @@
+# Local machine configuration — contains real paths. Never committed.
+# Copy config.sh.example to config.sh and fill in your values.
+# The glob also covers hand-carried copies like config.sh.ptah. The negation
+# must stay last, or the template gets caught too.
+config.sh*
+.config.sh*
+!config.sh.example
+
+# Local workplan / research documents — never committed.
+/_research
+
+.DS_Store
+*.log
