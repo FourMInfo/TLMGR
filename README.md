@@ -35,6 +35,9 @@ wrong.
 
 ## Script Commands
 
+`tlmgr-safe-update.sh` is linked into `~/.local/bin` (Dotfiles.Private `Files/links.txt`), so it also runs by name
+from any folder; it resolves the link to find `config.sh`.
+
 ### Check for updates (safe, read-only)
 
 ```bash
